@@ -25,7 +25,7 @@ import { ChatSessionUsage } from "@phoenix/components/agent/ChatSessionUsage";
 import { Loading } from "@phoenix/components/core";
 import { useNotify, useNotifyError } from "@phoenix/contexts";
 import { useAgentContext, useAgentStore } from "@phoenix/contexts/AgentContext";
-import type { AgentPosition } from "@phoenix/store/agentStore";
+import type { AgentPosition, AgentSession } from "@phoenix/store/agentStore";
 import { getErrorMessagesFromRelayMutationError } from "@phoenix/utils/errorUtils";
 
 import type { AgentSessionsResource_sessions$key } from "./__generated__/AgentSessionsResource_sessions.graphql";
@@ -211,6 +211,15 @@ function AgentSessionsContent({
       ),
     [sessionMap]
   );
+  // The slashed-eye indicator marks chats that exist as temporary sessions.
+  // An unsent temporary draft shows no icon until its first message is
+  // submitted — until then the composer toggle is the only mode signal.
+  const showsTemporaryIndicator = (session: AgentSession) =>
+    session.isTemporary &&
+    (session.id != null ||
+      session.messages.length > 0 ||
+      chatStatusBySessionId[session.clientKey] === "submitted" ||
+      chatStatusBySessionId[session.clientKey] === "streaming");
   const serverSessions = data.agentSessions.edges.map(({ node }) => {
     const runtimeSession = runtimeSessionById.get(node.id);
     const clientKey = runtimeSession?.clientKey ?? node.id;
@@ -244,7 +253,7 @@ function AgentSessionsContent({
           clientKey: session.clientKey,
           id: session.id,
           title: session.title,
-          isTemporary: session.isTemporary,
+          isTemporary: showsTemporaryIndicator(session),
           messages: session.messages,
           createdAt: session.createdAt,
           isDeleteDisabled:
@@ -452,7 +461,10 @@ function AgentSessionsContent({
         sessionDisplayName={sessionDisplayName}
         orderedSessions={orderedSessions}
         activeSessionId={activeSessionId}
-        isActiveSessionTemporary={activeRuntimeSession?.isTemporary ?? false}
+        isActiveSessionTemporary={
+          activeRuntimeSession != null &&
+          showsTemporaryIndicator(activeRuntimeSession)
+        }
         position={position}
         isPositionChangeDisabled={isPositionChangeDisabled}
         onSelectSession={setActiveSession}
