@@ -211,15 +211,19 @@ function AgentSessionsContent({
       ),
     [sessionMap]
   );
+  // A session counts as submitted the moment its first message goes out: the
+  // server id and the store's message mirror lag the send, but the chat
+  // status flips synchronously.
+  const hasSubmittedFirstMessage = (session: AgentSession) =>
+    session.id != null ||
+    session.messages.length > 0 ||
+    chatStatusBySessionId[session.clientKey] === "submitted" ||
+    chatStatusBySessionId[session.clientKey] === "streaming";
   // The slashed-eye indicator marks chats that exist as temporary sessions.
   // An unsent temporary draft shows no icon until its first message is
   // submitted — until then the composer toggle is the only mode signal.
   const showsTemporaryIndicator = (session: AgentSession) =>
-    session.isTemporary &&
-    (session.id != null ||
-      session.messages.length > 0 ||
-      chatStatusBySessionId[session.clientKey] === "submitted" ||
-      chatStatusBySessionId[session.clientKey] === "streaming");
+    session.isTemporary && hasSubmittedFirstMessage(session);
   const serverSessions = data.agentSessions.edges.map(({ node }) => {
     const runtimeSession = runtimeSessionById.get(node.id);
     const clientKey = runtimeSession?.clientKey ?? node.id;
@@ -464,6 +468,11 @@ function AgentSessionsContent({
         isActiveSessionTemporary={
           activeRuntimeSession != null &&
           showsTemporaryIndicator(activeRuntimeSession)
+        }
+        isActiveSessionUnsent={
+          activeSessionId == null ||
+          (activeRuntimeSession != null &&
+            !hasSubmittedFirstMessage(activeRuntimeSession))
         }
         position={position}
         isPositionChangeDisabled={isPositionChangeDisabled}
