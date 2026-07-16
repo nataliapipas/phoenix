@@ -183,7 +183,7 @@ GenerativeModelSDK: TypeAlias = Literal[
 ]
 ExperimentStatus: TypeAlias = Literal["RUNNING", "COMPLETED", "STOPPED", "ERROR"]
 EvalWorkStatus: TypeAlias = Literal["PENDING", "RUNNING", "DONE", "ERROR", "EXPIRED"]
-EvalWorkGrain: TypeAlias = Literal["SPAN"]
+EvalWorkGrain: TypeAlias = Literal["SPAN", "TRACE", "SESSION"]
 EvaluationTarget: TypeAlias = Literal["SPAN", "TRACE", "SESSION"]
 ExperimentLogCategory: TypeAlias = Literal["TASK", "EVAL", "EXPERIMENT"]
 ExperimentLogLevel: TypeAlias = Literal["ERROR", "WARN", "INFO"]
