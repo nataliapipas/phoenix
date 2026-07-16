@@ -55,7 +55,34 @@ describe("agentStore", () => {
       expect(state.sessionMap[sessionId]).toMatchObject({
         clientKey: sessionId,
         id: null,
+        isTemporary: false,
+        expiresAt: null,
       });
+    });
+
+    it("creates a temporary session when requested", () => {
+      const store = createAgentStore();
+
+      const sessionId = store.getState().createSession({ isTemporary: true });
+
+      expect(store.getState().sessionMap[sessionId]?.isTemporary).toBe(true);
+    });
+
+    it("defaults new sessions to temporary when the setting is on", () => {
+      const store = createAgentStore();
+      store.getState().setNewChatsAreTemporaryByDefault(true);
+
+      const defaultedSessionId = store.getState().createSession();
+      const explicitSessionId = store
+        .getState()
+        .createSession({ isTemporary: false });
+
+      expect(store.getState().sessionMap[defaultedSessionId]?.isTemporary).toBe(
+        true
+      );
+      expect(store.getState().sessionMap[explicitSessionId]?.isTemporary).toBe(
+        false
+      );
     });
 
     it("marks a local draft persisted without replacing its runtime state", () => {
@@ -193,6 +220,8 @@ describe("agentStore", () => {
         clientKey: "remote",
         id: "remote-node-id",
         title: "remote session",
+        isTemporary: false,
+        expiresAt: null,
         messages: [{ id: "m1", role: "user", parts: [] }],
         context: [],
         modelConfig: store.getState().defaultModelConfig,
@@ -222,6 +251,8 @@ describe("agentStore", () => {
         clientKey: localSessionId,
         id: "local-node-id",
         title: "server title",
+        isTemporary: false,
+        expiresAt: null,
         messages: [],
         context: [],
         modelConfig: store.getState().defaultModelConfig,
@@ -233,6 +264,93 @@ describe("agentStore", () => {
       const localSession = state.sessionMap[localSessionId];
       expect(localSession?.messages).toHaveLength(1);
       expect(localSession?.title).toBe("server title");
+    });
+  });
+
+  describe("setSessionTemporary", () => {
+    it("flips a draft's temporary flag", () => {
+      const store = createAgentStore();
+      const sessionId = store.getState().createSession();
+
+      store.getState().setSessionTemporary(sessionId, true);
+      expect(store.getState().sessionMap[sessionId]?.isTemporary).toBe(true);
+
+      store.getState().setSessionTemporary(sessionId, false);
+      expect(store.getState().sessionMap[sessionId]?.isTemporary).toBe(false);
+    });
+
+    it("no-ops once the session is persisted", () => {
+      const store = createAgentStore();
+      const sessionId = store.getState().createSession({ isTemporary: true });
+      store.getState().setSessionPersisted(sessionId, "session-node-id");
+
+      store.getState().setSessionTemporary(sessionId, false);
+
+      expect(store.getState().sessionMap[sessionId]?.isTemporary).toBe(true);
+    });
+  });
+
+  describe("pruneExpiredSessions", () => {
+    function createExpiredSession(store: ReturnType<typeof createAgentStore>) {
+      const sessionId = store.getState().createSession({ isTemporary: true });
+      store.getState().setSessionPersisted(sessionId, `node-${sessionId}`);
+      store.getState().setSessionExpiry(sessionId, Date.now() - 1);
+      return sessionId;
+    }
+
+    it("deletes expired sessions and spares live ones", () => {
+      const store = createAgentStore();
+      const expiredSessionId = createExpiredSession(store);
+      const liveTemporarySessionId = store
+        .getState()
+        .createSession({ isTemporary: true });
+      store
+        .getState()
+        .setSessionExpiry(liveTemporarySessionId, Date.now() + 60_000);
+      const persistentSessionId = store.getState().createSession();
+
+      const { prunedActiveSession } = store.getState().pruneExpiredSessions();
+
+      expect(store.getState().sessionMap[expiredSessionId]).toBeUndefined();
+      expect(store.getState().sessionMap[liveTemporarySessionId]).toBeDefined();
+      expect(store.getState().sessionMap[persistentSessionId]).toBeDefined();
+      // The active session (the persistent one, created last) survived.
+      expect(prunedActiveSession).toBeNull();
+    });
+
+    it("spares an expired session with an in-flight turn", () => {
+      const store = createAgentStore();
+      const sessionId = createExpiredSession(store);
+      store.getState().setSessionChatStatus(sessionId, "streaming");
+
+      store.getState().pruneExpiredSessions();
+
+      expect(store.getState().sessionMap[sessionId]).toBeDefined();
+    });
+
+    it("reports the pruned active session's composer draft", () => {
+      const store = createAgentStore();
+      const sessionId = createExpiredSession(store);
+      store.getState().setActiveSession(sessionId);
+      store.getState().setDraftInput(sessionId, "unsent thought");
+
+      const { prunedActiveSession } = store.getState().pruneExpiredSessions();
+
+      expect(prunedActiveSession).toEqual({ draftInput: "unsent thought" });
+      expect(store.getState().sessionMap[sessionId]).toBeUndefined();
+    });
+
+    it("never touches drafts or persistent sessions", () => {
+      const store = createAgentStore();
+      const draftId = store.getState().createSession({ isTemporary: true });
+      const persistentId = store.getState().createSession();
+      store.getState().setSessionPersisted(persistentId, "node-persistent");
+
+      const { prunedActiveSession } = store.getState().pruneExpiredSessions();
+
+      expect(store.getState().sessionMap[draftId]).toBeDefined();
+      expect(store.getState().sessionMap[persistentId]).toBeDefined();
+      expect(prunedActiveSession).toBeNull();
     });
   });
 
@@ -271,6 +389,24 @@ describe("agentStore", () => {
       const forked = store.getState().sessionMap[forkId!];
       expect(forked.modelConfig.modelName).toBe("gpt-4o");
       expect(forked.context).toEqual(["span:123"]);
+    });
+
+    it("inherits the source session's temporary mode", () => {
+      const store = createAgentStore();
+      const sourceId = store.getState().createSession({ isTemporary: true });
+      store.getState().setSessionPersisted(sourceId, "source-node-id");
+      store.getState().setSessionExpiry(sourceId, Date.now() + 1000);
+
+      const forkId = store.getState().forkSession({
+        sourceSessionId: sourceId,
+        messages: [],
+      });
+
+      const forked = store.getState().sessionMap[forkId!];
+      expect(forked.isTemporary).toBe(true);
+      // The fork is an unsent draft: no server row exists yet, so it cannot
+      // expire until its first send creates one.
+      expect(forked.expiresAt).toBeNull();
     });
 
     it("stages restored input as the forked session draft", () => {

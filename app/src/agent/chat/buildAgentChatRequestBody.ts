@@ -26,6 +26,12 @@ type BuildAgentChatRequestBodyOptions = {
   id: string;
   /** Node ID for agent session. */
   agentSessionId?: string | null;
+  /**
+   * Whether a newly created session should be temporary (kept out of durable
+   * history and expired after inactivity). Ignored by the server on
+   * continuation turns — a session's mode is fixed at creation.
+   */
+  temporary?: boolean;
   /** Full UI message history sent with the request. */
   messages: AgentUIMessage[];
   /** Reason the transport is sending this request. */
@@ -109,6 +115,7 @@ export function buildAgentChatRequestBody({
   body,
   id,
   agentSessionId = null,
+  temporary = false,
   messages,
   trigger,
   messageId,
@@ -135,6 +142,7 @@ export function buildAgentChatRequestBody({
     ...body,
     id,
     agentSessionId,
+    temporary,
     messages: toServerSafeUIMessages(
       enrichMessagesWithClientToolTimings({ messages, toolTimings })
     ),

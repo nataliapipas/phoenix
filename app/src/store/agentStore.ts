@@ -133,6 +133,18 @@ export type AgentSession = {
   id: string | null;
   /** Brief human-readable title for the conversation. */
   title: string;
+  /**
+   * Whether this chat is temporary: excluded from durable session history and
+   * deleted by the server after a period of inactivity.
+   */
+  isTemporary: boolean;
+  /**
+   * Local wall-clock deadline (ms since epoch) after which the server
+   * considers this session expired. Derived from the server's relative
+   * `expiresIn` at the moment it is received, so server/client clock skew
+   * never affects it. Null for persistent sessions and unsent drafts.
+   */
+  expiresAt: number | null;
   /** Messages in AI SDK UIMessage format. */
   messages: AgentUIMessage[];
   /** Contextual references (e.g. trace IDs, span IDs) attached to the session. */
@@ -290,6 +302,8 @@ export interface AgentProps {
   activeSessionId: string | null;
   /** Lookup table of sessions by their client key. */
   sessionMap: Record<string, AgentSession>;
+  /** Whether newly created chats default to temporary instead of persistent. */
+  newChatsAreTemporaryByDefault: boolean;
   /** Default model configuration applied to newly created sessions. */
   defaultModelConfig: ModelConfig;
   /** Server-provided PXI config used to describe trace destinations in the UI. */
@@ -311,7 +325,7 @@ export interface AgentState extends AgentProps {
   toggleOpen: () => void;
   setPosition: (position: AgentPosition) => void;
   setFabPlacement: (placement: AgentFabPlacement) => void;
-  createSession: () => string;
+  createSession: (options?: { isTemporary?: boolean }) => string;
   deleteSession: (sessionId: string) => void;
   forkSession: (params: {
     sourceSessionId: string;
@@ -328,6 +342,28 @@ export interface AgentState extends AgentProps {
   removeSessionContext: (sessionId: string, context: string) => void;
   setSessionMessages: (sessionId: string, messages: AgentUIMessage[]) => void;
   setSessionPersisted: (clientKey: string, id: string) => void;
+  /**
+   * Flips a draft's temporary flag. No-op once the session is persisted: the
+   * server fixes a session's mode at creation and there is no way to change
+   * it afterwards.
+   */
+  setSessionTemporary: (sessionId: string, isTemporary: boolean) => void;
+  /**
+   * Records the local expiry deadline (ms since epoch) the server reported
+   * for a temporary session, or null for persistent sessions.
+   */
+  setSessionExpiry: (sessionId: string, expiresAt: number | null) => void;
+  /**
+   * Deletes idle sessions whose local expiry deadline has passed. Returns the
+   * pruned active session's composer draft so the caller can carry it into a
+   * replacement chat, or null when the active session survived.
+   */
+  pruneExpiredSessions: () => {
+    prunedActiveSession: { draftInput: string } | null;
+  };
+  setNewChatsAreTemporaryByDefault: (
+    newChatsAreTemporaryByDefault: boolean
+  ) => void;
   /**
    * Adds a server-loaded transcript to the app-local runtime cache.
    */
@@ -636,6 +672,7 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
     sessions: [],
     activeSessionId: null,
     sessionMap: {},
+    newChatsAreTemporaryByDefault: false,
     defaultModelConfig: { ...DEFAULT_MODEL_CONFIG },
     agentsConfig: DEFAULT_AGENT_SERVER_CONFIG,
     observability: DEFAULT_AGENT_OBSERVABILITY_SETTINGS,
@@ -668,7 +705,7 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
     setFabPlacement: (fabPlacement) => {
       set({ fabPlacement }, false, { type: "setFabPlacement" });
     },
-    createSession: () => {
+    createSession: ({ isTemporary } = {}) => {
       const sessionId = generateUUID();
       set(
         (state) => {
@@ -676,6 +713,8 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
             clientKey: sessionId,
             id: null,
             title: "",
+            isTemporary: isTemporary ?? state.newChatsAreTemporaryByDefault,
+            expiresAt: null,
             messages: [],
             context: [],
             modelConfig: { ...state.defaultModelConfig },
@@ -704,6 +743,10 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
             clientKey: sessionId,
             id: null,
             title: buildForkTitle(source),
+            // A fork of a temporary chat stays temporary so content the user
+            // kept out of history is never silently persisted by a rewind.
+            isTemporary: source.isTemporary,
+            expiresAt: null,
             messages,
             // Carry over the source session's context and model so the fork
             // continues the same conversation under the same configuration.
@@ -878,6 +921,68 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
         false,
         { type: "setSessionPersisted" }
       );
+    },
+    setSessionTemporary: (sessionId, isTemporary) => {
+      set(
+        (state) => {
+          const session = state.sessionMap[sessionId];
+          if (!session || session.id != null) return state;
+          return {
+            sessionMap: {
+              ...state.sessionMap,
+              [sessionId]: { ...session, isTemporary },
+            },
+          };
+        },
+        false,
+        { type: "setSessionTemporary" }
+      );
+    },
+    setSessionExpiry: (sessionId, expiresAt) => {
+      set(
+        (state) => {
+          const session = state.sessionMap[sessionId];
+          if (!session) return state;
+          return {
+            sessionMap: {
+              ...state.sessionMap,
+              [sessionId]: { ...session, expiresAt },
+            },
+          };
+        },
+        false,
+        { type: "setSessionExpiry" }
+      );
+    },
+    pruneExpiredSessions: () => {
+      const state = get();
+      const now = Date.now();
+      const expiredSessionIds = state.sessions.filter((sessionId) => {
+        const session = state.sessionMap[sessionId];
+        const status = state.chatStatusBySessionId[sessionId];
+        // A session with an in-flight turn was just re-extended server-side;
+        // deleting it would strand the streaming chat runtime.
+        return (
+          session?.expiresAt != null &&
+          session.expiresAt <= now &&
+          status !== "submitted" &&
+          status !== "streaming"
+        );
+      });
+      const activeSessionId = state.activeSessionId;
+      const prunedActiveSession =
+        activeSessionId != null && expiredSessionIds.includes(activeSessionId)
+          ? { draftInput: state.draftInputBySessionId[activeSessionId] ?? "" }
+          : null;
+      for (const sessionId of expiredSessionIds) {
+        get().deleteSession(sessionId);
+      }
+      return { prunedActiveSession };
+    },
+    setNewChatsAreTemporaryByDefault: (newChatsAreTemporaryByDefault) => {
+      set({ newChatsAreTemporaryByDefault }, false, {
+        type: "setNewChatsAreTemporaryByDefault",
+      });
     },
     cacheSession: (session) => {
       set(
@@ -1365,6 +1470,7 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
         isOpen: state.isOpen,
         position: state.position,
         fabPlacement: state.fabPlacement,
+        newChatsAreTemporaryByDefault: state.newChatsAreTemporaryByDefault,
         defaultModelConfig: state.defaultModelConfig,
         observability: state.observability,
         permissions: state.permissions,

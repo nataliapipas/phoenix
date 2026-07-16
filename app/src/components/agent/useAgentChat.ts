@@ -17,6 +17,10 @@ import { handleAgentToolCall } from "@phoenix/agent/chat/handleAgentToolCall";
 import { getUnresolvedToolCalls } from "@phoenix/agent/chat/interruptToolCalls";
 import { rewindMessages } from "@phoenix/agent/chat/rewindMessages";
 import {
+  AgentSessionGoneError,
+  computeLocalExpiresAt,
+} from "@phoenix/agent/chat/sessionExpiry";
+import {
   SYSTEM_INTERRUPT_ERROR,
   USER_INTERRUPT_ERROR,
 } from "@phoenix/agent/chat/shouldSendAutomatically";
@@ -60,6 +64,20 @@ const turnClientStateByChat = new WeakMap<
   Chat<AgentUIMessage>,
   TurnClientState
 >();
+
+/**
+ * The chat route 404s only when the requested session is missing, expired, or
+ * owned by someone else. Surfacing that as a typed error at the fetch layer —
+ * where the status code is directly available — lets the error consumer
+ * trigger session-gone recovery without parsing response bodies.
+ */
+const sessionAwareFetch: typeof authFetch = async (input, init) => {
+  const response = await authFetch(input, init);
+  if (response.status === 404) {
+    throw new AgentSessionGoneError();
+  }
+  return response;
+};
 
 /**
  * Subscribes the current render surface to the persistent AI SDK chat runtime
@@ -147,7 +165,7 @@ export function useAgentChat({
               messages: runtimeMessages,
               transport: new DefaultChatTransport({
                 api: chatApiUrl,
-                fetch: authFetch,
+                fetch: sessionAwareFetch,
                 prepareSendMessagesRequest: ({
                   body,
                   id,
@@ -164,6 +182,9 @@ export function useAgentChat({
                       id,
                       agentSessionId:
                         store.getState().sessionMap[sessionId]?.id ?? null,
+                      temporary:
+                        store.getState().sessionMap[sessionId]?.isTemporary ??
+                        false,
                       messages,
                       trigger,
                       messageId,
@@ -215,10 +236,22 @@ export function useAgentChat({
               },
               onData: (dataPart) => {
                 if (dataPart.type === "data-session-created") {
-                  store
-                    .getState()
-                    .setSessionPersisted(sessionId, dataPart.data.id);
-                  void refetchAgentSessions({ environment: relayEnvironment });
+                  const state = store.getState();
+                  state.setSessionPersisted(sessionId, dataPart.data.id);
+                  // The relative expiry is only valid at receipt; convert it
+                  // to a local deadline before it goes anywhere near state.
+                  state.setSessionExpiry(
+                    sessionId,
+                    computeLocalExpiresAt(dataPart.data.expiresIn)
+                  );
+                  // Temporary sessions are excluded from the sessions
+                  // connection, so refetching it would be a wasted round-trip
+                  // that also resets pagination.
+                  if (dataPart.data.expiresIn == null) {
+                    void refetchAgentSessions({
+                      environment: relayEnvironment,
+                    });
+                  }
                   return;
                 }
                 if (dataPart.type === "data-session-summary") {

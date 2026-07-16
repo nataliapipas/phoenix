@@ -1,3 +1,4 @@
+import { isTextUIPart } from "ai";
 import {
   Suspense,
   useCallback,
@@ -17,11 +18,12 @@ import {
   useRelayEnvironment,
 } from "react-relay";
 
+import { isAgentSessionGoneError } from "@phoenix/agent/chat/sessionExpiry";
 import type { AgentUIMessage } from "@phoenix/agent/chat/types";
 import { Button, Flex, Text } from "@phoenix/components";
 import { ChatSessionUsage } from "@phoenix/components/agent/ChatSessionUsage";
 import { Loading } from "@phoenix/components/core";
-import { useNotifyError } from "@phoenix/contexts";
+import { useNotify, useNotifyError } from "@phoenix/contexts";
 import { useAgentContext, useAgentStore } from "@phoenix/contexts/AgentContext";
 import type { AgentPosition } from "@phoenix/store/agentStore";
 import { getErrorMessagesFromRelayMutationError } from "@phoenix/utils/errorUtils";
@@ -98,6 +100,41 @@ function AgentSessionsLoader({
   return <AgentSessionsContent {...props} query={query} />;
 }
 
+/**
+ * Prunes expired temporary sessions when the user returns to the tab (and on
+ * mount). Timers are unreliable in throttled or frozen background tabs, so
+ * expiry is evaluated on the events that fire exactly when the user comes
+ * back; a send into an already-expired session is separately caught by the
+ * chat route's 404.
+ */
+function useExpiredSessionPruning({
+  onActiveSessionPruned,
+}: {
+  onActiveSessionPruned: (details: { draftInput: string }) => void;
+}) {
+  const store = useAgentStore();
+  useEffect(() => {
+    const prune = () => {
+      const { prunedActiveSession } = store.getState().pruneExpiredSessions();
+      if (prunedActiveSession) {
+        onActiveSessionPruned(prunedActiveSession);
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        prune();
+      }
+    };
+    prune();
+    window.addEventListener("focus", prune);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", prune);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [onActiveSessionPruned, store]);
+}
+
 function AgentSessionsContent({
   query,
   position,
@@ -134,6 +171,7 @@ function AgentSessionsContent({
   const store = useAgentStore();
   const relayEnvironment = useRelayEnvironment();
   const activeSessionId = useAgentContext((state) => state.activeSessionId);
+  const sessions = useAgentContext((state) => state.sessions);
   const sessionMap = useAgentContext((state) => state.sessionMap);
   const chatStatusBySessionId = useAgentContext(
     (state) => state.chatStatusBySessionId
@@ -141,6 +179,7 @@ function AgentSessionsContent({
   const setActiveSession = useAgentContext((state) => state.setActiveSession);
   const createLocalSession = useAgentContext((state) => state.createSession);
   const deleteLocalSession = useAgentContext((state) => state.deleteSession);
+  const notify = useNotify();
   const notifyError = useNotifyError();
   const connectionId = ConnectionHandler.getConnectionID(
     "client:root",
@@ -179,6 +218,7 @@ function AgentSessionsContent({
       clientKey,
       id: node.id,
       title: runtimeSession?.title || node.title,
+      isTemporary: runtimeSession?.isTemporary ?? false,
       messages: runtimeSession?.messages ?? [],
       createdAt: Date.parse(node.createdAt as string),
       isDeleteDisabled:
@@ -186,31 +226,33 @@ function AgentSessionsContent({
         chatStatusBySessionId[clientKey] === "streaming",
     } satisfies AgentSessionListItem;
   });
-  const activeSessionCache = activeSessionId
-    ? sessionMap[activeSessionId]
-    : undefined;
-  const activeLocalSession =
-    activeSessionCache &&
-    !serverSessions.some(
-      (session) => session.clientKey === activeSessionCache.clientKey
-    )
-      ? activeSessionCache
-      : undefined;
-  const localSessions: AgentSessionListItem[] = activeLocalSession
-    ? [
+  const serverSessionClientKeys = new Set(
+    serverSessions.map((session) => session.clientKey)
+  );
+  // Temporary sessions never appear in the server connection, so every live
+  // local session must be surfaced from the runtime store or it would vanish
+  // from the menu the moment another chat becomes active.
+  const localSessions: AgentSessionListItem[] = [...sessions]
+    .reverse()
+    .flatMap((sessionId) => {
+      const session = sessionMap[sessionId];
+      if (!session || serverSessionClientKeys.has(session.clientKey)) {
+        return [];
+      }
+      return [
         {
-          clientKey: activeLocalSession.clientKey,
-          id: activeLocalSession.id,
-          title: activeLocalSession.title,
-          messages: activeLocalSession.messages,
-          createdAt: activeLocalSession.createdAt,
+          clientKey: session.clientKey,
+          id: session.id,
+          title: session.title,
+          isTemporary: session.isTemporary,
+          messages: session.messages,
+          createdAt: session.createdAt,
           isDeleteDisabled:
-            chatStatusBySessionId[activeLocalSession.clientKey] ===
-              "submitted" ||
-            chatStatusBySessionId[activeLocalSession.clientKey] === "streaming",
+            chatStatusBySessionId[session.clientKey] === "submitted" ||
+            chatStatusBySessionId[session.clientKey] === "streaming",
         },
-      ]
-    : [];
+      ];
+    });
   const orderedSessions = [...localSessions, ...serverSessions];
   const orderedSessionsRef = useRef(orderedSessions);
   orderedSessionsRef.current = orderedSessions;
@@ -340,12 +382,88 @@ function AgentSessionsContent({
     [createSession, relayEnvironment, setActiveSession]
   );
 
+  const handleActiveSessionPruned = ({
+    draftInput,
+  }: {
+    draftInput: string;
+  }) => {
+    const newSessionId = createLocalSession();
+    if (draftInput) {
+      store.getState().setDraftInput(newSessionId, draftInput);
+    }
+    notify({
+      title: "Temporary chat expired",
+      message: draftInput
+        ? "That chat expired and was removed. Your unsent message was moved to a new chat."
+        : "That chat expired and was removed. You're now in a new chat.",
+    });
+  };
+  useExpiredSessionPruning({
+    onActiveSessionPruned: handleActiveSessionPruned,
+  });
+
+  // Recovery for a send the server rejected because the session no longer
+  // exists — expired between client checks, swept early, or deleted in
+  // another tab. The failed message text is restored into a fresh chat's
+  // composer rather than auto-sent: the new session has none of the prior
+  // context, so the user should re-decide before sending.
+  const handleSessionGone = ({
+    sessionId,
+    restoredInput,
+  }: {
+    sessionId: string;
+    restoredInput: string;
+  }) => {
+    const goneSession = store.getState().sessionMap[sessionId];
+    if (!goneSession) {
+      return;
+    }
+    // A persistent session deleted elsewhere may still have a cached edge in
+    // the sessions connection; drop it so the menu agrees with the server.
+    const goneSessionServerId = goneSession.id;
+    if (goneSessionServerId) {
+      commitLocalUpdate(relayEnvironment, (relayStore) => {
+        const connection = ConnectionHandler.getConnection(
+          relayStore.getRoot(),
+          AGENT_SESSIONS_CONNECTION_KEY
+        );
+        if (connection) {
+          ConnectionHandler.deleteNode(connection, goneSessionServerId);
+        }
+      });
+    }
+    const wasTemporary = goneSession.isTemporary;
+    deleteLocalSession(sessionId);
+    const newSessionId = createLocalSession();
+    if (restoredInput) {
+      store.getState().setDraftInput(newSessionId, restoredInput);
+    }
+    notify({
+      title: wasTemporary ? "Temporary chat expired" : "Chat no longer exists",
+      message: restoredInput
+        ? "That chat is no longer available. Your message was moved to a new chat."
+        : "That chat is no longer available. You're now in a new chat.",
+    });
+  };
+
   return (
     <>
       <AgentChatHeader
         sessionDisplayName={sessionDisplayName}
         orderedSessions={orderedSessions}
         activeSessionId={activeSessionId}
+        isActiveSessionTemporary={activeRuntimeSession?.isTemporary ?? false}
+        isTemporaryToggleReadOnly={
+          activeRuntimeSession == null || activeRuntimeSession.id != null
+        }
+        onToggleTemporary={() => {
+          if (!activeSessionId) {
+            return;
+          }
+          const isTemporary =
+            store.getState().sessionMap[activeSessionId]?.isTemporary ?? false;
+          store.getState().setSessionTemporary(activeSessionId, !isTemporary);
+        }}
         position={position}
         isPositionChangeDisabled={isPositionChangeDisabled}
         onSelectSession={setActiveSession}
@@ -363,6 +481,7 @@ function AgentSessionsContent({
             key={activeSessionId}
             sessionId={activeSessionId}
             initialMessages={activeRuntimeSession.messages}
+            onSessionGone={handleSessionGone}
           />
         ) : (
           <Suspense fallback={<Loading />}>
@@ -370,6 +489,7 @@ function AgentSessionsContent({
               key={activeSessionId}
               sessionId={activeSessionId}
               onMissing={handleMissingSession}
+              onSessionGone={handleSessionGone}
             />
           </Suspense>
         )
@@ -383,9 +503,11 @@ function AgentSessionsContent({
 function AgentSessionTranscript({
   sessionId,
   onMissing,
+  onSessionGone,
 }: {
   sessionId: string;
   onMissing: (sessionId: string) => void;
+  onSessionGone: (params: { sessionId: string; restoredInput: string }) => void;
 }) {
   const data = useLazyLoadQuery<AgentSessionsResourceSessionQuery>(
     graphql`
@@ -427,6 +549,10 @@ function AgentSessionTranscript({
       clientKey: sessionId,
       id: agentSession.id,
       title: agentSession.title,
+      // Only persistent sessions are reachable through the sessions
+      // connection, so a server-loaded transcript is never temporary.
+      isTemporary: false,
+      expiresAt: null,
       messages,
       context: [],
       modelConfig: { ...defaultModelConfig },
@@ -438,16 +564,22 @@ function AgentSessionTranscript({
     return <Loading />;
   }
   return (
-    <AgentChatController sessionId={sessionId} initialMessages={messages} />
+    <AgentChatController
+      sessionId={sessionId}
+      initialMessages={messages}
+      onSessionGone={onSessionGone}
+    />
   );
 }
 
 function AgentChatController({
   sessionId,
   initialMessages,
+  onSessionGone,
 }: {
   sessionId: string;
   initialMessages: AgentUIMessage[];
+  onSessionGone: (params: { sessionId: string; restoredInput: string }) => void;
 }) {
   const { chatApiUrl, modelSelection, menuValue, handleModelChange } =
     useAgentChatPanelState();
@@ -469,6 +601,24 @@ function AgentChatController({
     modelSelection,
     initialMessages,
   });
+
+  useEffect(() => {
+    if (!isAgentSessionGoneError(error)) {
+      return;
+    }
+    // The failed send is the last user message: the AI SDK appends it to the
+    // transcript before the request goes out.
+    const lastUserMessage = [...messages]
+      .reverse()
+      .find((message) => message.role === "user");
+    const restoredInput = lastUserMessage
+      ? lastUserMessage.parts
+          .filter(isTextUIPart)
+          .map((part) => part.text)
+          .join("")
+      : "";
+    onSessionGone({ sessionId, restoredInput });
+  }, [error, messages, onSessionGone, sessionId]);
 
   return (
     <ChatView
