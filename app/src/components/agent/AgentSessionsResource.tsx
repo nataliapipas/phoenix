@@ -219,7 +219,7 @@ function AgentSessionsContent({
     session.messages.length > 0 ||
     chatStatusBySessionId[session.clientKey] === "submitted" ||
     chatStatusBySessionId[session.clientKey] === "streaming";
-  // The slashed-eye indicator marks chats that exist as temporary sessions.
+  // The ephemerality indicator marks chats that exist as temporary sessions.
   // An unsent temporary draft shows no icon until its first message is
   // submitted — until then the composer toggle is the only mode signal.
   const showsTemporaryIndicator = (session: AgentSession) =>
