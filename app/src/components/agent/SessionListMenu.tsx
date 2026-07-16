@@ -2,7 +2,6 @@ import { useCallback, useRef, useState } from "react";
 
 import type { AgentUIMessage } from "@phoenix/agent/chat/types";
 import {
-  Badge,
   Button,
   Flex,
   Icon,
@@ -21,6 +20,7 @@ import { StopPropagation } from "@phoenix/components/StopPropagation";
 import { formatRelativeShort } from "@phoenix/utils/timeFormatUtils";
 
 import { getSessionDisplayName } from "./sessionTitleUtils";
+import { TemporarySessionIcon } from "./TemporarySessionIcon";
 
 /**
  * Props for the session list menu.
@@ -192,7 +192,7 @@ function SessionMenuItem({
       <Flex direction="column" gap="size-50">
         <Flex direction="row" alignItems="center" gap="size-50">
           <Text>{displayName}</Text>
-          {session.isTemporary ? <Badge>Temporary</Badge> : null}
+          {session.isTemporary ? <TemporarySessionIcon /> : null}
         </Flex>
         {dateLabel && (
           <Text size="XS" color="text-300">

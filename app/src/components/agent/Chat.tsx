@@ -61,6 +61,7 @@ import {
   type MessageRewindRole,
 } from "./MessageRewindDialog";
 import { PxiGlyph } from "./PxiGlyph";
+import { TemporaryChatToggle } from "./TemporaryChatToggle";
 import { isToolUIPart } from "./toolPartTypes";
 import { useAgentChat } from "./useAgentChat";
 
@@ -427,6 +428,19 @@ export function ChatView({
   );
   const setPermissions = useAgentContext((state) => state.setPermissions);
   const createSession = useAgentContext((state) => state.createSession);
+  const isTemporaryChat = useAgentContext((state) =>
+    sessionId ? (state.sessionMap[sessionId]?.isTemporary ?? false) : false
+  );
+  const isUnsentDraft = useAgentContext((state) => {
+    if (!sessionId) {
+      return false;
+    }
+    const session = state.sessionMap[sessionId];
+    return session != null && session.id == null;
+  });
+  const setSessionTemporary = useAgentContext(
+    (state) => state.setSessionTemporary
+  );
 
   const setSessionDraftInput = (input: string | null) => {
     if (!sessionId) {
@@ -767,6 +781,14 @@ export function ChatView({
               </div>
               {children ? (
                 <div className="chat__children">{children}</div>
+              ) : null}
+              {sessionId && isUnsentDraft && messages.length === 0 ? (
+                <TemporaryChatToggle
+                  isTemporary={isTemporaryChat}
+                  onToggle={() =>
+                    setSessionTemporary(sessionId, !isTemporaryChat)
+                  }
+                />
               ) : null}
             </div>
           ) : children ? (

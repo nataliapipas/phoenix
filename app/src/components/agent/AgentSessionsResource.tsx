@@ -453,17 +453,6 @@ function AgentSessionsContent({
         orderedSessions={orderedSessions}
         activeSessionId={activeSessionId}
         isActiveSessionTemporary={activeRuntimeSession?.isTemporary ?? false}
-        isTemporaryToggleReadOnly={
-          activeRuntimeSession == null || activeRuntimeSession.id != null
-        }
-        onToggleTemporary={() => {
-          if (!activeSessionId) {
-            return;
-          }
-          const isTemporary =
-            store.getState().sessionMap[activeSessionId]?.isTemporary ?? false;
-          store.getState().setSessionTemporary(activeSessionId, !isTemporary);
-        }}
         position={position}
         isPositionChangeDisabled={isPositionChangeDisabled}
         onSelectSession={setActiveSession}
