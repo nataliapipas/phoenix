@@ -1038,6 +1038,7 @@ class SessionCreatedData(TypedDict):
     title: str
     createdAt: str
     updatedAt: str
+    expiresIn: NotRequired[float]
 
 
 class SessionSummaryChunk(TypedDict):
@@ -1697,6 +1698,7 @@ class ChatRegenerateMessage(TypedDict):
         ]
     ]
     agentSessionId: NotRequired[str]
+    temporary: NotRequired[bool]
     editPermission: NotRequired[Literal["manual", "bypass"]]
     requestedSkills: NotRequired[Sequence[str]]
     turnTraceContext: NotRequired[TurnTraceContext]
@@ -1731,6 +1733,7 @@ class ChatSubmitMessage(TypedDict):
         ]
     ]
     agentSessionId: NotRequired[str]
+    temporary: NotRequired[bool]
     editPermission: NotRequired[Literal["manual", "bypass"]]
     requestedSkills: NotRequired[Sequence[str]]
     turnTraceContext: NotRequired[TurnTraceContext]

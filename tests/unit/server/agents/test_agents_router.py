@@ -37,8 +37,12 @@ from pydantic_ai.ui.vercel_ai.response_types import (
 from sqlalchemy import func, select
 from sqlalchemy.exc import SAWarning
 from sqlalchemy.ext.asyncio import AsyncSession
+from strawberry.relay import GlobalID
 
-from phoenix.config import get_env_phoenix_agents_assistant_project_name
+from phoenix.config import (
+    TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS,
+    get_env_phoenix_agents_assistant_project_name,
+)
 from phoenix.db import models
 from phoenix.db.types.data_stream_protocol import PhoenixUIMessage, TurnTraceContext, UIMessage
 from phoenix.server.agents.data_stream_protocol import (
@@ -230,6 +234,7 @@ async def test_chat_turn_persists_session_transcript(
     created_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-session-created"]
     assert len(created_chunks) == 1
     assert created_chunks[0]["transient"] is True
+    assert created_chunks[0]["data"].get("expiresIn") is None
     agent_session_id = created_chunks[0]["data"]["id"]
     assert "sessionId" not in created_chunks[0]["data"]
     chunk_types = [chunk.get("type") for chunk in chunks]
@@ -245,8 +250,10 @@ async def test_chat_turn_persists_session_transcript(
         assert agent_session.user_id is None
         assert UUID(agent_session.project_session_id).version == 4
         assert agent_session.project_name == get_env_phoenix_agents_assistant_project_name()
+        assert agent_session.expires_at is None
         # The in-stream summary is persisted as the session title.
         assert agent_session.title == "a"
+
         messages = await _load_session_messages(session, agent_session.id)
         persisted_session_id = agent_session.project_session_id
         # No bash command this turn, so no shell-state snapshot row.
@@ -292,6 +299,109 @@ async def test_chat_turn_persists_session_transcript(
         agent_session = await session.scalar(select(models.AgentSession))
         assert agent_session is not None
         assert agent_session.title == "a"
+
+
+async def test_temporary_chat_session_creation_and_continuation_refresh_expiry(
+    db: DbSessionFactory,
+    httpx_client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_build_model(*args: object, **kwargs: object) -> TestModel:
+        return TestModel(call_tools=[])
+
+    monkeypatch.setattr(_BUILD_MODEL_PATCH_TARGET, _fake_build_model)
+    session_id = "99999999-9999-4999-8999-999999999999"
+    before_creation = datetime.now(timezone.utc)
+    first_response = await httpx_client.post(
+        _chat_url(),
+        json=_chat_body(session_id, [_user_message("temporary")], temporary=True),
+    )
+    after_creation = datetime.now(timezone.utc)
+
+    assert first_response.status_code == 200
+    first_created_chunk = next(
+        chunk
+        for chunk in _stream_chunks(first_response.text)
+        if chunk.get("type") == "data-session-created"
+    )
+    assert first_created_chunk["data"]["expiresIn"] == (
+        TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS * 60 * 60
+    )
+    agent_session_id = first_created_chunk["data"]["id"]
+
+    async with db() as session:
+        agent_session = await session.scalar(select(models.AgentSession))
+        assert agent_session is not None
+        assert agent_session.expires_at is not None
+        assert (
+            before_creation + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+            <= agent_session.expires_at
+            <= after_creation + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+        )
+        agent_session.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        agent_session_rowid = agent_session.id
+
+    before_continuation = datetime.now(timezone.utc)
+    second_response = await httpx_client.post(
+        _chat_url(),
+        json=_chat_body(
+            session_id,
+            [_user_message("continue", message_id="msg-user-2")],
+            agent_session_id=agent_session_id,
+        ),
+    )
+    after_continuation = datetime.now(timezone.utc)
+
+    assert second_response.status_code == 200
+    second_created_chunk = next(
+        chunk
+        for chunk in _stream_chunks(second_response.text)
+        if chunk.get("type") == "data-session-created"
+    )
+    assert second_created_chunk["data"]["expiresIn"] == (
+        TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS * 60 * 60
+    )
+    async with db() as session:
+        refreshed_expiry = await session.scalar(
+            select(models.AgentSession.expires_at).where(
+                models.AgentSession.id == agent_session_rowid
+            )
+        )
+    assert refreshed_expiry is not None
+    assert (
+        before_continuation + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+        <= refreshed_expiry
+        <= after_continuation + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+    )
+
+
+async def test_expired_temporary_chat_session_returns_not_found(
+    db: DbSessionFactory,
+    httpx_client: httpx.AsyncClient,
+) -> None:
+    async with db() as session:
+        agent_session = models.AgentSession(
+            project_session_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            project_name="assistant_agent",
+            user_id=None,
+            title="expired",
+            expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+        session.add(agent_session)
+        await session.flush()
+        agent_session_id = str(GlobalID("AgentSession", str(agent_session.id)))
+
+    response = await httpx_client.post(
+        _chat_url(),
+        json=_chat_body(
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            [_user_message("too late")],
+            agent_session_id=agent_session_id,
+        ),
+    )
+
+    assert response.status_code == 404
+    assert response.text == "Session not found"
 
 
 def test_message_metadata_can_use_propagated_root_span_context() -> None:

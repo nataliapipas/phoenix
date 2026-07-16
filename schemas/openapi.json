@@ -8373,6 +8373,11 @@
             ],
             "title": "Agentsessionid"
           },
+          "temporary": {
+            "type": "boolean",
+            "title": "Temporary",
+            "default": false
+          },
           "editPermission": {
             "type": "string",
             "enum": [
@@ -8501,6 +8506,11 @@
               }
             ],
             "title": "Agentsessionid"
+          },
+          "temporary": {
+            "type": "boolean",
+            "title": "Temporary",
+            "default": false
           },
           "editPermission": {
             "type": "string",
@@ -17711,6 +17721,18 @@
             "format": "date-time",
             "title": "Updatedat",
             "type": "string"
+          },
+          "expiresIn": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expiresin"
           }
         },
         "required": [

@@ -68,6 +68,7 @@ from strawberry.relay import GlobalID
 from typing_extensions import TypeIs, assert_never
 
 from phoenix.config import (
+    TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS,
     get_env_phoenix_agents_assistant_project_name,
     get_env_phoenix_agents_disable_bash,
     get_env_phoenix_agents_force_tracing,
@@ -205,6 +206,7 @@ class SessionCreatedData(_CamelBaseModel):
     title: str
     created_at: datetime
     updated_at: datetime
+    expires_in: float | None = None
 
 
 @register_openapi_schema
@@ -275,6 +277,7 @@ class _ChatMessageMixin(_ObservabilityMixin):
 
     contexts: list[ChatContext] = Field(default_factory=list)
     agent_session_id: str | None = None
+    temporary: bool = False
     edit_permission: Literal["manual", "bypass"] = "manual"
     requested_skills: list[str] = Field(
         default_factory=list,
@@ -1162,6 +1165,7 @@ async def _create_agent_session(
     user_id: int | None,
     messages: Sequence[PhoenixUIMessage],
     project_name: str,
+    expires_at: datetime | None = None,
 ) -> models.AgentSession:
     """Create a session for a request with messages."""
     assert messages
@@ -1170,6 +1174,7 @@ async def _create_agent_session(
         user_id=user_id,
         title="",
         project_name=project_name,
+        expires_at=expires_at,
     )
     session.add(created_agent_session)
     await session.flush()
@@ -1184,13 +1189,17 @@ async def _create_agent_session(
     return created_agent_session
 
 
-async def _load_agent_session(
+async def _load_agent_session_for_turn(
     session: AsyncSession,
     *,
     agent_session_id: str,
     user_id: int | None,
 ) -> models.AgentSession:
-    """Load an owner-qualified session or raise a not-found response."""
+    """Load an owner-qualified session for a chat turn.
+
+    Raises a not-found response when the session is missing, belongs to a
+    different user, or has expired. Refreshes the expiry of temporary sessions.
+    """
     try:
         agent_session_rowid = from_global_id_with_expected_type(
             GlobalID.from_id(agent_session_id),
@@ -1201,6 +1210,13 @@ async def _load_agent_session(
     loaded_agent_session = await session.get(models.AgentSession, agent_session_rowid)
     if loaded_agent_session is None or loaded_agent_session.user_id != user_id:
         raise HTTPException(status_code=404, detail="Session not found")
+    now = datetime.now(timezone.utc)
+    if loaded_agent_session.expires_at is not None:
+        if loaded_agent_session.expires_at <= now:
+            raise HTTPException(status_code=404, detail="Session not found")
+        loaded_agent_session.expires_at = now + timedelta(
+            hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS
+        )
     return loaded_agent_session
 
 
@@ -1545,15 +1561,22 @@ def create_agents_router(authentication_enabled: bool) -> APIRouter:
         try:
             async with request.app.state.db() as session:
                 if body.agent_session_id is None:
+                    expires_at = (
+                        datetime.now(timezone.utc)
+                        + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+                        if body.temporary
+                        else None
+                    )
                     agent_session = await _create_agent_session(
                         session,
                         otel_session_id=str(uuid4()),
                         user_id=request_user_id,
                         messages=body.messages,
                         project_name=configured_project_name,
+                        expires_at=expires_at,
                     )
                 else:
-                    agent_session = await _load_agent_session(
+                    agent_session = await _load_agent_session_for_turn(
                         session,
                         agent_session_id=body.agent_session_id,
                         user_id=request_user_id,
@@ -1604,6 +1627,11 @@ def create_agents_router(authentication_enabled: bool) -> APIRouter:
                     title=agent_session.title,
                     created_at=agent_session.created_at,
                     updated_at=agent_session.updated_at,
+                    expires_in=(
+                        TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS * 60 * 60
+                        if agent_session.expires_at is not None
+                        else None
+                    ),
                 )
                 initial_bash_snapshot = await _load_bash_snapshot(
                     session,

@@ -1809,6 +1809,11 @@ export interface components {
             /** Agentsessionid */
             agentSessionId?: string | null;
             /**
+             * Temporary
+             * @default false
+             */
+            temporary?: boolean;
+            /**
              * Editpermission
              * @default manual
              * @enum {string}
@@ -1864,6 +1869,11 @@ export interface components {
             contexts?: components["schemas"]["ChatContext"][];
             /** Agentsessionid */
             agentSessionId?: string | null;
+            /**
+             * Temporary
+             * @default false
+             */
+            temporary?: boolean;
             /**
              * Editpermission
              * @default manual
@@ -5724,6 +5734,11 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+            /**
+             * Expiresin
+             * @default null
+             */
+            expiresIn?: number | null;
         };
         /**
          * SessionSummaryChunk
