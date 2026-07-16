@@ -151,10 +151,16 @@ export function AgentChatHeader({
             flex-shrink: 0;
           `}
         />
-        <Text weight="heavy" css={sessionHeadingCSS} title={sessionDisplayName}>
-          {sessionDisplayName}
-        </Text>
-        {isActiveSessionTemporary ? <TemporarySessionIcon /> : null}
+        <Flex direction="row" alignItems="center" gap="size-100" minWidth={0}>
+          <Text
+            weight="heavy"
+            css={sessionHeadingCSS}
+            title={sessionDisplayName}
+          >
+            {sessionDisplayName}
+          </Text>
+          {isActiveSessionTemporary ? <TemporarySessionIcon /> : null}
+        </Flex>
         {showBetaBadge ? (
           <TooltipTrigger delay={0}>
             <Pressable>
