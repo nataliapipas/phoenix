@@ -134,16 +134,10 @@ export type AgentSession = {
   /** Brief human-readable title for the conversation. */
   title: string;
   /**
-   * Whether this chat is temporary: excluded from durable session history and
-   * deleted by the server after a period of inactivity.
+   * Whether the chat is temporary.
    */
   isTemporary: boolean;
-  /**
-   * Local wall-clock deadline (ms since epoch) after which the server
-   * considers this session expired. Derived from the server's relative
-   * `expiresIn` at the moment it is received, so server/client clock skew
-   * never affects it. Null for persistent sessions and unsent drafts.
-   */
+  /** Local expiry deadline (epoch ms) from `expiresIn`; null for persistent sessions and drafts. */
   expiresAt: number | null;
   /** Messages in AI SDK UIMessage format. */
   messages: AgentUIMessage[];
@@ -343,13 +337,11 @@ export interface AgentState extends AgentProps {
   setSessionMessages: (sessionId: string, messages: AgentUIMessage[]) => void;
   setSessionPersisted: (clientKey: string, id: string) => void;
   /**
-   * Flips a draft's temporary flag. No-op once the session is persisted: the
-   * server fixes a session's mode at creation and there is no way to change
-   * it afterwards.
+   * Flips a draft's temporary flag. No-op once the session is persisted.
    */
   setSessionTemporary: (sessionId: string, isTemporary: boolean) => void;
   /**
-   * Records the local expiry deadline (ms since epoch) the server reported
+   * Records the local expiry deadline (ms since epoch)
    * for a temporary session, or null for persistent sessions.
    */
   setSessionExpiry: (sessionId: string, expiresAt: number | null) => void;
@@ -361,6 +353,7 @@ export interface AgentState extends AgentProps {
   pruneExpiredSessions: () => {
     prunedActiveSession: { draftInput: string } | null;
   };
+  /** Sets whether newly created chats are temporary by default. */
   setNewChatsAreTemporaryByDefault: (
     newChatsAreTemporaryByDefault: boolean
   ) => void;
@@ -743,9 +736,7 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
             clientKey: sessionId,
             id: null,
             title: buildForkTitle(source),
-            // A fork of a temporary chat stays temporary so content the user
-            // kept out of history is never silently persisted by a rewind.
-            isTemporary: source.isTemporary,
+            isTemporary: source.isTemporary, // A fork of a temporary chat stays temporary
             expiresAt: null,
             messages,
             // Carry over the source session's context and model so the fork
@@ -979,6 +970,7 @@ export const createAgentStore = (initialProps?: Partial<AgentProps>) => {
       }
       return { prunedActiveSession };
     },
+    /** Sets whether newly created chats are temporary by default. */
     setNewChatsAreTemporaryByDefault: (newChatsAreTemporaryByDefault) => {
       set({ newChatsAreTemporaryByDefault }, false, {
         type: "setNewChatsAreTemporaryByDefault",

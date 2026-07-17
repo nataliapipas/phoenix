@@ -27,9 +27,7 @@ type BuildAgentChatRequestBodyOptions = {
   /** Node ID for agent session. */
   agentSessionId?: string | null;
   /**
-   * Whether a newly created session should be temporary (kept out of durable
-   * history and expired after inactivity). Ignored by the server on
-   * continuation turns — a session's mode is fixed at creation.
+   * Whether a newly created session should be temporary.
    */
   temporary?: boolean;
   /** Full UI message history sent with the request. */

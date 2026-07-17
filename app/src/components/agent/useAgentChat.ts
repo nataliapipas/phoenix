@@ -17,7 +17,7 @@ import { handleAgentToolCall } from "@phoenix/agent/chat/handleAgentToolCall";
 import { getUnresolvedToolCalls } from "@phoenix/agent/chat/interruptToolCalls";
 import { rewindMessages } from "@phoenix/agent/chat/rewindMessages";
 import {
-  AgentSessionGoneError,
+  AgentSessionNotFoundError,
   computeLocalExpiresAt,
 } from "@phoenix/agent/chat/sessionExpiry";
 import {
@@ -74,7 +74,7 @@ const turnClientStateByChat = new WeakMap<
 const sessionAwareFetch: typeof authFetch = async (input, init) => {
   const response = await authFetch(input, init);
   if (response.status === 404) {
-    throw new AgentSessionGoneError();
+    throw new AgentSessionNotFoundError();
   }
   return response;
 };

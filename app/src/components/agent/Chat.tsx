@@ -476,6 +476,8 @@ export function ChatView({
     status === "submitted" || status === "streaming";
   const isSendDisabledForMissingCredentials =
     !isWaitingForAssistant && Boolean(missingCredentialsProvider);
+  const canToggleTemporaryChat =
+    sessionId != null && isUnsentDraft && messages.length === 0;
   const showThinkingIndicator = shouldShowThinkingIndicator({
     status,
     messages,
@@ -782,7 +784,7 @@ export function ChatView({
               {children ? (
                 <div className="chat__children">{children}</div>
               ) : null}
-              {sessionId && isUnsentDraft && messages.length === 0 ? (
+              {canToggleTemporaryChat ? (
                 <TemporaryChatToggle
                   isTemporary={isTemporaryChat}
                   onToggle={() =>

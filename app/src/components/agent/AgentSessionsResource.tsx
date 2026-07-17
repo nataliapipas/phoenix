@@ -18,7 +18,7 @@ import {
   useRelayEnvironment,
 } from "react-relay";
 
-import { isAgentSessionGoneError } from "@phoenix/agent/chat/sessionExpiry";
+import { isAgentSessionNotFoundError } from "@phoenix/agent/chat/sessionExpiry";
 import type { AgentUIMessage } from "@phoenix/agent/chat/types";
 import { Button, Flex, Text } from "@phoenix/components";
 import { ChatSessionUsage } from "@phoenix/components/agent/ChatSessionUsage";
@@ -613,7 +613,7 @@ function AgentChatController({
   });
 
   useEffect(() => {
-    if (!isAgentSessionGoneError(error)) {
+    if (!isAgentSessionNotFoundError(error)) {
       return;
     }
     // The failed send is the last user message: the AI SDK appends it to the
