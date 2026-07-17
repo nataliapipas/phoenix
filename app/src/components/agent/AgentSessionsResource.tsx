@@ -1,4 +1,3 @@
-import { isTextUIPart } from "ai";
 import {
   Suspense,
   useCallback,
@@ -417,16 +416,9 @@ function AgentSessionsContent({
 
   // Recovery for a send the server rejected because the session no longer
   // exists — expired between client checks, swept early, or deleted in
-  // another tab. The failed message text is restored into a fresh chat's
-  // composer rather than auto-sent: the new session has none of the prior
-  // context, so the user should re-decide before sending.
-  const handleSessionGone = ({
-    sessionId,
-    restoredInput,
-  }: {
-    sessionId: string;
-    restoredInput: string;
-  }) => {
+  // another tab. The gone session is discarded and the user is dropped into a
+  // fresh chat.
+  const handleSessionGone = ({ sessionId }: { sessionId: string }) => {
     const goneSession = store.getState().sessionMap[sessionId];
     if (!goneSession) {
       return;
@@ -447,15 +439,10 @@ function AgentSessionsContent({
     }
     const wasTemporary = goneSession.isTemporary;
     deleteLocalSession(sessionId);
-    const newSessionId = createLocalSession();
-    if (restoredInput) {
-      store.getState().setDraftInput(newSessionId, restoredInput);
-    }
+    createLocalSession();
     notify({
       title: wasTemporary ? "Temporary chat expired" : "Chat no longer exists",
-      message: restoredInput
-        ? "That chat is no longer available. Your message was moved to a new chat."
-        : "That chat is no longer available. You're now in a new chat.",
+      message: "That chat is no longer available. You're now in a new chat.",
     });
   };
 
@@ -517,7 +504,7 @@ function AgentSessionTranscript({
 }: {
   sessionId: string;
   onMissing: (sessionId: string) => void;
-  onSessionGone: (params: { sessionId: string; restoredInput: string }) => void;
+  onSessionGone: (params: { sessionId: string }) => void;
 }) {
   const data = useLazyLoadQuery<AgentSessionsResourceSessionQuery>(
     graphql`
@@ -589,7 +576,7 @@ function AgentChatController({
 }: {
   sessionId: string;
   initialMessages: AgentUIMessage[];
-  onSessionGone: (params: { sessionId: string; restoredInput: string }) => void;
+  onSessionGone: (params: { sessionId: string }) => void;
 }) {
   const { chatApiUrl, modelSelection, menuValue, handleModelChange } =
     useAgentChatPanelState();
@@ -616,19 +603,8 @@ function AgentChatController({
     if (!isAgentSessionNotFoundError(error)) {
       return;
     }
-    // The failed send is the last user message: the AI SDK appends it to the
-    // transcript before the request goes out.
-    const lastUserMessage = [...messages]
-      .reverse()
-      .find((message) => message.role === "user");
-    const restoredInput = lastUserMessage
-      ? lastUserMessage.parts
-          .filter(isTextUIPart)
-          .map((part) => part.text)
-          .join("")
-      : "";
-    onSessionGone({ sessionId, restoredInput });
-  }, [error, messages, onSessionGone, sessionId]);
+    onSessionGone({ sessionId });
+  }, [error, onSessionGone, sessionId]);
 
   return (
     <ChatView

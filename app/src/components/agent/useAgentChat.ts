@@ -71,7 +71,7 @@ const turnClientStateByChat = new WeakMap<
  * where the status code is directly available — lets the error consumer
  * trigger session-gone recovery without parsing response bodies.
  */
-const sessionAwareFetch: typeof authFetch = async (input, init) => {
+const agentSessionAwareFetch: typeof authFetch = async (input, init) => {
   const response = await authFetch(input, init);
   if (response.status === 404) {
     throw new AgentSessionNotFoundError();
@@ -165,7 +165,7 @@ export function useAgentChat({
               messages: runtimeMessages,
               transport: new DefaultChatTransport({
                 api: chatApiUrl,
-                fetch: sessionAwareFetch,
+                fetch: agentSessionAwareFetch,
                 prepareSendMessagesRequest: ({
                   body,
                   id,
