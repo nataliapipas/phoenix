@@ -1,5 +1,12 @@
 # Changelog
 
+## [18.1.1](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v18.1.0...arize-phoenix-v18.1.1) (2026-07-17)
+
+
+### Bug Fixes
+
+* tab padding broken ([#14478](https://github.com/Arize-ai/phoenix/issues/14478)) ([8ecea00](https://github.com/Arize-ai/phoenix/commit/8ecea00b2f752146dd156d7e3d5155b6ad3df086))
+
 ## [18.1.0](https://github.com/Arize-ai/phoenix/compare/arize-phoenix-v18.0.0...arize-phoenix-v18.1.0) (2026-07-17)
 
 
