@@ -62,8 +62,19 @@ from phoenix.server.api.types.SandboxConfig import (
     SandboxConfig,
 )
 from phoenix.server.bearer_auth import PhoenixUser
-from phoenix.server.online_eval.session_policy import MINIMUM_EVALUATION_DELAY_SECONDS
+from phoenix.server.online_eval.session_policy import (
+    DEFAULT_SESSION_EVALUATION_DELAY_SECONDS,
+    MINIMUM_EVALUATION_DELAY_SECONDS,
+)
 from phoenix.trace.dsl.filter import validate_span_filter_condition
+
+_PROJECT_EVALUATOR_SCHEDULING_DESCRIPTION = (
+    "SPAN evaluators run on matching spans. Unfiltered SESSION evaluators with full sampling "
+    "are evaluated once: work is scheduled after the session first stays quiet for the "
+    "evaluation delay, and execution begins when a consumer claims it. Later activity does not "
+    "schedule another evaluation. Filtered or sampled SESSION evaluators and TRACE evaluators "
+    "are stored but not yet scheduled."
+)
 
 
 def _output_config_input_to_pydantic(input: AnnotationConfigInput) -> OutputConfigType:
@@ -433,7 +444,10 @@ class CreateProjectLLMEvaluatorInput:
     evaluation_delay_seconds: Optional[int] = strawberry.field(
         default=None,
         description=(
-            "Seconds of inactivity before a SESSION evaluation. Null uses the default delay."
+            "Seconds a SESSION must stay quiet before work is scheduled. The minimum is "
+            f"{MINIMUM_EVALUATION_DELAY_SECONDS} seconds; null uses the default of "
+            f"{DEFAULT_SESSION_EVALUATION_DELAY_SECONDS} seconds. A session is evaluated only "
+            "once, and later activity does not schedule another evaluation."
         ),
     )
 
@@ -454,8 +468,11 @@ class UpdateProjectLLMEvaluatorInput:
     evaluation_delay_seconds: Optional[int] = strawberry.field(
         default=UNSET,
         description=(
-            "SESSION evaluation delay in seconds. Omit to preserve the current setting or use "
-            "null to restore the default delay."
+            "Seconds a SESSION must stay quiet before work is scheduled. The minimum is "
+            f"{MINIMUM_EVALUATION_DELAY_SECONDS} seconds; omit to preserve the current setting "
+            f"or use null to restore the default of {DEFAULT_SESSION_EVALUATION_DELAY_SECONDS} "
+            "seconds. A session is evaluated only once, and later activity does not schedule "
+            "another evaluation."
         ),
     )
 
@@ -484,7 +501,10 @@ class CreateProjectCodeEvaluatorInput:
     evaluation_delay_seconds: Optional[int] = strawberry.field(
         default=None,
         description=(
-            "Seconds of inactivity before a SESSION evaluation. Null uses the default delay."
+            "Seconds a SESSION must stay quiet before work is scheduled. The minimum is "
+            f"{MINIMUM_EVALUATION_DELAY_SECONDS} seconds; null uses the default of "
+            f"{DEFAULT_SESSION_EVALUATION_DELAY_SECONDS} seconds. A session is evaluated only "
+            "once, and later activity does not schedule another evaluation."
         ),
     )
 
@@ -512,8 +532,11 @@ class UpdateProjectCodeEvaluatorInput:
     evaluation_delay_seconds: Optional[int] = strawberry.field(
         default=UNSET,
         description=(
-            "SESSION evaluation delay in seconds. Omit to preserve the current setting or use "
-            "null to restore the default delay."
+            "Seconds a SESSION must stay quiet before work is scheduled. The minimum is "
+            f"{MINIMUM_EVALUATION_DELAY_SECONDS} seconds; omit to preserve the current setting "
+            f"or use null to restore the default of {DEFAULT_SESSION_EVALUATION_DELAY_SECONDS} "
+            "seconds. A session is evaluated only once, and later activity does not schedule "
+            "another evaluation."
         ),
     )
 
@@ -585,11 +608,7 @@ class CreateCodeEvaluatorVersionPayload:
 class EvaluatorMutationMixin:
     @strawberry.mutation(
         permission_classes=[IsNotReadOnly, IsNotViewer, IsLocked],
-        description=(
-            "Create an LLM project evaluator. SPAN evaluators run on matching spans; "
-            "unfiltered SESSION evaluators with full sampling run after their evaluation delay. "
-            "TRACE evaluators are stored but not scheduled."
-        ),
+        description=f"Create an LLM project evaluator. {_PROJECT_EVALUATOR_SCHEDULING_DESCRIPTION}",
     )  # type: ignore
     async def create_project_llm_evaluator(
         self, info: Info[Context, None], input: CreateProjectLLMEvaluatorInput
@@ -695,11 +714,7 @@ class EvaluatorMutationMixin:
 
     @strawberry.mutation(
         permission_classes=[IsNotReadOnly, IsNotViewer, IsLocked],
-        description=(
-            "Update an LLM project evaluator. SPAN evaluators run on matching spans; "
-            "unfiltered SESSION evaluators with full sampling run after their evaluation delay. "
-            "TRACE evaluators are stored but not scheduled."
-        ),
+        description=f"Update an LLM project evaluator. {_PROJECT_EVALUATOR_SCHEDULING_DESCRIPTION}",
     )  # type: ignore
     async def update_project_llm_evaluator(
         self, info: Info[Context, None], input: UpdateProjectLLMEvaluatorInput
@@ -827,11 +842,7 @@ class EvaluatorMutationMixin:
 
     @strawberry.mutation(
         permission_classes=[IsNotReadOnly, IsNotViewer, IsLocked],
-        description=(
-            "Create a CODE project evaluator. SPAN evaluators run on matching spans; "
-            "unfiltered SESSION evaluators with full sampling run after their evaluation delay. "
-            "TRACE evaluators are stored but not scheduled."
-        ),
+        description=f"Create a CODE project evaluator. {_PROJECT_EVALUATOR_SCHEDULING_DESCRIPTION}",
     )  # type: ignore
     async def create_project_code_evaluator(
         self, info: Info[Context, None], input: CreateProjectCodeEvaluatorInput
@@ -915,11 +926,7 @@ class EvaluatorMutationMixin:
 
     @strawberry.mutation(
         permission_classes=[IsNotReadOnly, IsNotViewer, IsLocked],
-        description=(
-            "Update a CODE project evaluator. SPAN evaluators run on matching spans; "
-            "unfiltered SESSION evaluators with full sampling run after their evaluation delay. "
-            "TRACE evaluators are stored but not scheduled."
-        ),
+        description=f"Update a CODE project evaluator. {_PROJECT_EVALUATOR_SCHEDULING_DESCRIPTION}",
     )  # type: ignore
     async def update_project_code_evaluator(
         self, info: Info[Context, None], input: UpdateProjectCodeEvaluatorInput

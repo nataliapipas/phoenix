@@ -847,7 +847,7 @@ input CreateProjectCodeEvaluatorInput {
   enabled: Boolean! = true
 
   """
-  Seconds of inactivity before a SESSION evaluation. Null uses the default delay.
+  Seconds a SESSION must stay quiet before work is scheduled. The minimum is 10 seconds; null uses the default of 300 seconds. A session is evaluated only once, and later activity does not schedule another evaluation.
   """
   evaluationDelaySeconds: Int = null
 }
@@ -873,7 +873,7 @@ input CreateProjectLLMEvaluatorInput {
   enabled: Boolean! = true
 
   """
-  Seconds of inactivity before a SESSION evaluation. Null uses the default delay.
+  Seconds a SESSION must stay quiet before work is scheduled. The minimum is 10 seconds; null uses the default of 300 seconds. A session is evaluated only once, and later activity does not schedule another evaluation.
   """
   evaluationDelaySeconds: Int = null
 }
@@ -2467,22 +2467,22 @@ type Mutation {
   deleteDocumentAnnotations(input: DeleteAnnotationsInput!): DocumentAnnotationMutationPayload!
 
   """
-  Create an LLM project evaluator. SPAN evaluators run on matching spans; unfiltered SESSION evaluators with full sampling run after their evaluation delay. TRACE evaluators are stored but not scheduled.
+  Create an LLM project evaluator. SPAN evaluators run on matching spans. Unfiltered SESSION evaluators with full sampling are evaluated once: work is scheduled after the session first stays quiet for the evaluation delay, and execution begins when a consumer claims it. Later activity does not schedule another evaluation. Filtered or sampled SESSION evaluators and TRACE evaluators are stored but not yet scheduled.
   """
   createProjectLlmEvaluator(input: CreateProjectLLMEvaluatorInput!): ProjectEvaluatorMutationPayload!
 
   """
-  Update an LLM project evaluator. SPAN evaluators run on matching spans; unfiltered SESSION evaluators with full sampling run after their evaluation delay. TRACE evaluators are stored but not scheduled.
+  Update an LLM project evaluator. SPAN evaluators run on matching spans. Unfiltered SESSION evaluators with full sampling are evaluated once: work is scheduled after the session first stays quiet for the evaluation delay, and execution begins when a consumer claims it. Later activity does not schedule another evaluation. Filtered or sampled SESSION evaluators and TRACE evaluators are stored but not yet scheduled.
   """
   updateProjectLlmEvaluator(input: UpdateProjectLLMEvaluatorInput!): ProjectEvaluatorMutationPayload!
 
   """
-  Create a CODE project evaluator. SPAN evaluators run on matching spans; unfiltered SESSION evaluators with full sampling run after their evaluation delay. TRACE evaluators are stored but not scheduled.
+  Create a CODE project evaluator. SPAN evaluators run on matching spans. Unfiltered SESSION evaluators with full sampling are evaluated once: work is scheduled after the session first stays quiet for the evaluation delay, and execution begins when a consumer claims it. Later activity does not schedule another evaluation. Filtered or sampled SESSION evaluators and TRACE evaluators are stored but not yet scheduled.
   """
   createProjectCodeEvaluator(input: CreateProjectCodeEvaluatorInput!): ProjectEvaluatorMutationPayload!
 
   """
-  Update a CODE project evaluator. SPAN evaluators run on matching spans; unfiltered SESSION evaluators with full sampling run after their evaluation delay. TRACE evaluators are stored but not scheduled.
+  Update a CODE project evaluator. SPAN evaluators run on matching spans. Unfiltered SESSION evaluators with full sampling are evaluated once: work is scheduled after the session first stays quiet for the evaluation delay, and execution begins when a consumer claims it. Later activity does not schedule another evaluation. Filtered or sampled SESSION evaluators and TRACE evaluators are stored but not yet scheduled.
   """
   updateProjectCodeEvaluator(input: UpdateProjectCodeEvaluatorInput!): ProjectEvaluatorMutationPayload!
   deleteProjectEvaluators(input: DeleteProjectEvaluatorsInput!): DeleteProjectEvaluatorsPayload!
@@ -2903,12 +2903,12 @@ type ProjectEvaluator implements Node {
   samplingRate: Float!
 
   """
-  Evaluation grain. SPAN evaluators run on matching spans; unfiltered SESSION evaluators with full sampling run after their evaluation delay. TRACE evaluators are stored but not scheduled.
+  Evaluation grain. SPAN evaluators run on matching spans. Unfiltered SESSION evaluators with full sampling are evaluated once: work is scheduled after the session first stays quiet for the evaluation delay, and execution begins when a consumer claims it. Later activity does not schedule another evaluation. Filtered or sampled SESSION evaluators and TRACE evaluators are stored but not yet scheduled.
   """
   evaluationTarget: EvaluationTarget!
 
   """
-  Seconds of inactivity before a SESSION evaluation. Null uses the default of 300 seconds.
+  Seconds a SESSION must stay quiet before work is scheduled. Values must be at least 10 seconds. Null uses the default of 300 seconds. A session is evaluated only once, and later activity does not schedule another evaluation.
   """
   evaluationDelaySeconds: Int
   inputMapping: EvaluatorInputMapping!
@@ -4672,7 +4672,7 @@ input UpdateProjectCodeEvaluatorInput {
   inputMapping: EvaluatorInputMappingInput
 
   """
-  SESSION evaluation delay in seconds. Omit to preserve the current setting or use null to restore the default delay.
+  Seconds a SESSION must stay quiet before work is scheduled. The minimum is 10 seconds; omit to preserve the current setting or use null to restore the default of 300 seconds. A session is evaluated only once, and later activity does not schedule another evaluation.
   """
   evaluationDelaySeconds: Int
 }
@@ -4691,7 +4691,7 @@ input UpdateProjectLLMEvaluatorInput {
   promptVersionId: ID
 
   """
-  SESSION evaluation delay in seconds. Omit to preserve the current setting or use null to restore the default delay.
+  Seconds a SESSION must stay quiet before work is scheduled. The minimum is 10 seconds; omit to preserve the current setting or use null to restore the default of 300 seconds. A session is evaluated only once, and later activity does not schedule another evaluation.
   """
   evaluationDelaySeconds: Int
 }
