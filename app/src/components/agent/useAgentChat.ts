@@ -233,13 +233,7 @@ export function useAgentChat({
         transport: new DefaultChatTransport({
           api: chatApiUrl,
           fetch: authFetch,
-          prepareSendMessagesRequest: ({
-            body,
-            id,
-            messages,
-            trigger,
-            messageId,
-          }) => {
+          prepareSendMessagesRequest: ({ body, id, messages }) => {
             // The gate may clear state for a stale completed turn before
             // this request reads the active turn trace context.
             turnCompletionGate.beginTurn();
@@ -249,8 +243,6 @@ export function useAgentChat({
                 id,
                 agentSessionId: targetSessionId,
                 messages,
-                trigger,
-                messageId,
                 capabilities: store.getState().capabilities,
                 observability: store.getState().observability,
                 agentsConfig: store.getState().agentsConfig,
@@ -346,7 +338,6 @@ export function useAgentChat({
   const {
     messages,
     sendMessage,
-    regenerate,
     status,
     error,
     addToolOutput,
@@ -710,16 +701,6 @@ export function useAgentChat({
     ]
   );
 
-  const retryMessage = useCallback(
-    (messageId?: string) => {
-      if (!sessionId || !chatInstance || isRequestActive(chatInstance.status)) {
-        return;
-      }
-      void regenerate(messageId ? { messageId } : undefined);
-    },
-    [chatInstance, regenerate, sessionId]
-  );
-
   return {
     messages,
     sendMessage: handleSendMessage,
@@ -729,7 +710,6 @@ export function useAgentChat({
     pendingElicitation,
     handleElicitationSubmit,
     handleElicitationCancel,
-    retryMessage,
     rewindToMessage,
     forkFromMessage,
   } as {
@@ -744,7 +724,6 @@ export function useAgentChat({
     pendingElicitation: PendingElicitation | null;
     handleElicitationSubmit: (output: ElicitToolOutput) => void;
     handleElicitationCancel: () => void;
-    retryMessage: (messageId?: string) => void;
     rewindToMessage: (messageId: string) => Promise<string | null>;
     forkFromMessage: (messageId: string) => void;
   };
