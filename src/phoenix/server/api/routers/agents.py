@@ -68,7 +68,6 @@ from strawberry.relay import GlobalID
 from typing_extensions import TypeIs, assert_never
 
 from phoenix.config import (
-    TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS,
     get_env_phoenix_agents_assistant_project_name,
     get_env_phoenix_agents_disable_bash,
     get_env_phoenix_agents_force_tracing,
@@ -153,6 +152,8 @@ from phoenix.tracers import (
 _PHOENIX_PROVIDER_METADATA_KEY = "phoenix"
 
 _PXI_INSTRUMENTATION_SCOPE = InstrumentationScope("phoenix.server.pxi")
+
+_TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS = 24
 
 register_openapi_schema(ToolCallProviderMetadata)
 register_openapi_schema(ToolCallCallbackProviderMetadata)
@@ -1204,7 +1205,7 @@ async def _refresh_and_load_agent_session(
     except ValueError:
         raise HTTPException(status_code=404, detail="Session not found") from None
     now = datetime.now(timezone.utc)
-    refreshed_expiry = now + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+    refreshed_expiry = now + timedelta(hours=_TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
     session_owner_filter = (
         models.AgentSession.user_id.is_(None)
         if user_id is None
@@ -1224,10 +1225,6 @@ async def _refresh_and_load_agent_session(
             expires_at=case(
                 (models.AgentSession.expires_at.is_not(None), refreshed_expiry),
                 else_=models.AgentSession.expires_at,
-            ),
-            updated_at=case(
-                (models.AgentSession.expires_at.is_not(None), func.now()),
-                else_=models.AgentSession.updated_at,
             ),
         )
         .returning(models.AgentSession)
@@ -1580,7 +1577,7 @@ def create_agents_router(authentication_enabled: bool) -> APIRouter:
                 if body.agent_session_id is None:
                     expires_at = (
                         datetime.now(timezone.utc)
-                        + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+                        + timedelta(hours=_TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
                         if body.temporary
                         else None
                     )
@@ -1645,7 +1642,7 @@ def create_agents_router(authentication_enabled: bool) -> APIRouter:
                     created_at=agent_session.created_at,
                     updated_at=agent_session.updated_at,
                     expires_in=(
-                        TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS * 60 * 60
+                        _TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS * 60 * 60
                         if agent_session.expires_at is not None
                         else None
                     ),

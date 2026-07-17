@@ -39,10 +39,7 @@ from sqlalchemy.exc import SAWarning
 from sqlalchemy.ext.asyncio import AsyncSession
 from strawberry.relay import GlobalID
 
-from phoenix.config import (
-    TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS,
-    get_env_phoenix_agents_assistant_project_name,
-)
+from phoenix.config import get_env_phoenix_agents_assistant_project_name
 from phoenix.db import models
 from phoenix.db.types.data_stream_protocol import PhoenixUIMessage, TurnTraceContext, UIMessage
 from phoenix.server.agents.data_stream_protocol import (
@@ -50,6 +47,7 @@ from phoenix.server.agents.data_stream_protocol import (
 )
 from phoenix.server.agents.pydantic_ai import OpenInferenceModelWrapper
 from phoenix.server.api.routers.agents import (
+    _TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS,
     _build_message_metadata_chunk,
     _emit_turn_root_span,
     _get_span_context,
@@ -325,7 +323,7 @@ async def test_temporary_chat_session_creation_and_continuation_refresh_expiry(
         if chunk.get("type") == "data-session-created"
     )
     assert first_created_chunk["data"]["expiresIn"] == (
-        TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS * 60 * 60
+        _TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS * 60 * 60
     )
     agent_session_id = first_created_chunk["data"]["id"]
 
@@ -334,9 +332,9 @@ async def test_temporary_chat_session_creation_and_continuation_refresh_expiry(
         assert agent_session is not None
         assert agent_session.expires_at is not None
         assert (
-            before_creation + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+            before_creation + timedelta(hours=_TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
             <= agent_session.expires_at
-            <= after_creation + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+            <= after_creation + timedelta(hours=_TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
         )
         agent_session.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
         agent_session_rowid = agent_session.id
@@ -359,7 +357,7 @@ async def test_temporary_chat_session_creation_and_continuation_refresh_expiry(
         if chunk.get("type") == "data-session-created"
     )
     assert second_created_chunk["data"]["expiresIn"] == (
-        TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS * 60 * 60
+        _TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS * 60 * 60
     )
     async with db() as session:
         refreshed_expiry = await session.scalar(
@@ -369,9 +367,9 @@ async def test_temporary_chat_session_creation_and_continuation_refresh_expiry(
         )
     assert refreshed_expiry is not None
     assert (
-        before_continuation + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+        before_continuation + timedelta(hours=_TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
         <= refreshed_expiry
-        <= after_continuation + timedelta(hours=TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
+        <= after_continuation + timedelta(hours=_TEMPORARY_AGENT_SESSION_TIME_TO_LIVE_HOURS)
     )
 
 
